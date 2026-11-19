@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    // Each user can read profile info, but only the owner can modify their profile
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if false; // Profiles shouldn't be deleted accidentally
+    }
+
+    // Donations collection
+    match /donations/{donationId} {
+      // Anyone can browse available food donations; authenticated users can view all
+      allow read: if true;
+      
+      // Only authenticated users can create donations, must set their own donorId
+      allow create: if isAuthenticated() 
+        && request.resource.data.donorId == request.auth.uid
+        && request.resource.data.status == 'available';
+
+      // The donor can update their own donation, OR an authenticated user can claim it
+      allow update: if isAuthenticated() && (
+        // Donor can edit their own donation details
+        (resource.data.donorId == request.auth.uid) ||
+        // A receiver can transition from 'available' to 'claimed' if not the donor
+        (resource.data.status == 'available' 
+          && request.resource.data.status == 'claimed'
+          && resource.data.donorId != request.auth.uid) ||
+        // Receiver or donor can transition claim status (completed or cancelled)
+        (resource.data.status == 'claimed' && (
+          request.resource.data.status == 'available' || // cancelled
+          request.resource.data.status == 'completed'   // handed over
+        ))
+      );
+
+      // Only the donor can delete their own donation if not claimed
+      allow delete: if isAuthenticated() && resource.data.donorId == request.auth.uid;
+    }
+
+    // Claims collection
+    match /claims/{claimId} {
+      // The donor or receiver involved can read the claim
+      allow read: if isAuthenticated() && (
+        resource.data.receiverId == request.auth.uid || 
+        resource.data.donorId == request.auth.uid
+      );
+
+      // Receivers can create a claim, must not be the donor
+      allow create: if isAuthenticated() 
+        && request.resource.data.receiverId == request.auth.uid
+        && request.resource.data.donorId != request.auth.uid
+        && request.resource.data.status == 'active';
+
+      // Receiver can cancel, Donor can complete
+      allow update: if isAuthenticated() && (
+        resource.data.receiverId == request.auth.uid || 
+        resource.data.donorId == request.auth.uid
+      );
+
+      allow delete: if false;
+    }
+  }
+}
