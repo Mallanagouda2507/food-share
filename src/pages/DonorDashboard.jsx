@@ -14,7 +14,12 @@ import {
   RefreshCw,
   Sparkles,
   MapPin,
-  Users
+  Users,
+  Compass,
+  Navigation,
+  Crosshair,
+  Map,
+  X
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -25,6 +30,7 @@ import {
 import { SeedDemoDataBtn } from "../components/food/SeedDemoDataBtn";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { getCategoryBadgeStyle } from "../components/food/FoodCard";
+import { LocationMap, calculateDistance } from "../components/common/LocationMap";
 
 export const DonorDashboard = () => {
   const { currentUser, userProfile } = useAuth();
@@ -34,6 +40,12 @@ export const DonorDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all"); // 'all', 'available', 'claimed', 'completed'
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Live Location states
+  const [donorLiveLocation, setDonorLiveLocation] = useState(null);
+  const [detectingLiveLocation, setDetectingLiveLocation] = useState(false);
+  const [selectedMapItem, setSelectedMapItem] = useState(null);
+  const [showLocationHub, setShowLocationHub] = useState(true);
 
   useEffect(() => {
     if (currentUser?.uid) {
@@ -46,11 +58,68 @@ export const DonorDashboard = () => {
     try {
       const data = await getUserDonations(currentUser?.uid);
       setDonations(data);
+      if (data.length > 0 && !selectedMapItem) {
+        setSelectedMapItem(data[0]);
+      }
     } catch (err) {
       console.error("Error loading donor donations:", err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Detect donor's real-time GPS position from browser sensor
+  const detectDonorLiveLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setDetectingLiveLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+          );
+          const data = await res.json();
+          const info = {
+            latitude,
+            longitude,
+            address: data.display_name || `Live GPS: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+            timestamp: new Date().toLocaleTimeString(),
+          };
+          setDonorLiveLocation(info);
+          setSelectedMapItem({
+            latitude,
+            longitude,
+            location: info.address,
+            foodName: "My Current Live Location",
+          });
+        } catch {
+          const info = {
+            latitude,
+            longitude,
+            address: `Live GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+            timestamp: new Date().toLocaleTimeString(),
+          };
+          setDonorLiveLocation(info);
+          setSelectedMapItem({
+            latitude,
+            longitude,
+            location: info.address,
+            foodName: "My Current Live Location",
+          });
+        } finally {
+          setDetectingLiveLocation(false);
+        }
+      },
+      (err) => {
+        alert("Location access denied or unavailable: " + err.message);
+        setDetectingLiveLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleDelete = async (id) => {
@@ -159,6 +228,143 @@ export const DonorDashboard = () => {
           <p className="text-[11px] text-slate-500 font-medium">{totalServingsGiven} servings delivered</p>
         </div>
 
+      </div>
+
+      {/* Real-Time Donor Location & Map Center */}
+      <div className="bg-white rounded-3xl border border-cream-200 shadow-card overflow-hidden">
+        <div className="p-5 sm:p-6 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+              <Compass className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white">Live Donor Location & Map Center</h2>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                  Real-Time GPS
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Pinpoint real-time pickup coordinates for community receivers & food couriers
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={detectDonorLiveLocation}
+              disabled={detectingLiveLocation}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-xs"
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              <span>{detectingLiveLocation ? "Locating..." : "Detect Live GPS Position"}</span>
+            </button>
+            <button
+              onClick={() => setShowLocationHub(!showLocationHub)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700"
+            >
+              {showLocationHub ? "Hide Map" : "Show Map"}
+            </button>
+          </div>
+        </div>
+
+        {showLocationHub && (
+          <div className="p-5 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Left 2 Cols: Interactive Map */}
+            <div className="lg:col-span-2">
+              <LocationMap
+                latitude={
+                  selectedMapItem?.latitude ||
+                  donorLiveLocation?.latitude ||
+                  (donations[0]?.latitude) ||
+                  12.9716
+                }
+                longitude={
+                  selectedMapItem?.longitude ||
+                  donorLiveLocation?.longitude ||
+                  (donations[0]?.longitude) ||
+                  77.5946
+                }
+                address={
+                  selectedMapItem?.location ||
+                  donorLiveLocation?.address ||
+                  (donations[0]?.location) ||
+                  "Main Donor Distribution Center"
+                }
+                title={
+                  selectedMapItem
+                    ? `Pickup Point: ${selectedMapItem.foodName}`
+                    : donorLiveLocation
+                    ? "Your Real-Time Current Location"
+                    : "Active Pickup Location"
+                }
+                height="h-64 sm:h-72"
+              />
+            </div>
+
+            {/* Right Col: Live Points Directory */}
+            <div className="space-y-3 flex flex-col justify-between">
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>Donor Pickup Points:</span>
+                  <span className="text-primary-700 font-bold">{donations.length} Active</span>
+                </h3>
+
+                {donorLiveLocation && (
+                  <div className="p-3 mb-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+                      Current Device Location Verified
+                    </p>
+                    <p className="text-[11px] truncate text-emerald-800">{donorLiveLocation.address}</p>
+                    <p className="text-[10px] text-emerald-600 font-mono">
+                      {donorLiveLocation.latitude.toFixed(4)}°, {donorLiveLocation.longitude.toFixed(4)}° &bull; {donorLiveLocation.timestamp}
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {donations.map((d) => (
+                    <button
+                      key={d.id || d.donationId}
+                      onClick={() => setSelectedMapItem(d)}
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2 ${
+                        selectedMapItem?.id === d.id
+                          ? "bg-primary-50 border-primary-500 shadow-2xs font-semibold"
+                          : "bg-slate-50 hover:bg-slate-100 border-slate-200"
+                      }`}
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-accent-500 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-slate-800 font-bold truncate">{d.foodName}</p>
+                        <p className="text-[10px] text-slate-500 truncate">{d.location}</p>
+                      </div>
+                    </button>
+                  ))}
+                  {donations.length === 0 && (
+                    <p className="text-xs text-slate-400 italic">No pickup points added yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <span className="flex items-center gap-1 text-[11px]">
+                  <Compass className="w-3.5 h-3.5 text-primary-600" />
+                  GPS Enabled for Handover Safety
+                </span>
+                <Link
+                  to="/donate"
+                  className="text-primary-700 hover:text-primary-800 font-bold text-xs"
+                >
+                  + Add Point
+                </Link>
+              </div>
+
+            </div>
+
+          </div>
+        )}
       </div>
 
       {/* Filter Tabs & Donation Management */}
@@ -291,6 +497,19 @@ export const DonorDashboard = () => {
                           <MapPin className="w-3.5 h-3.5 text-slate-400" />
                           <span className="truncate">{item.location}</span>
                         </span>
+                        {item.latitude && item.longitude && (
+                          <button
+                            onClick={() => {
+                              setSelectedMapItem(item);
+                              setShowLocationHub(true);
+                              window.scrollTo({ top: 350, behavior: "smooth" });
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700 hover:text-primary-800 bg-primary-50 px-2 py-0.5 rounded-md"
+                          >
+                            <Compass className="w-3 h-3" />
+                            <span>View on Map</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Claimant Information Box if Claimed */}

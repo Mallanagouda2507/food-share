@@ -11,9 +11,11 @@ import {
   CheckCircle,
   Sparkles,
   ShieldCheck,
-  Building
+  Building,
+  Navigation
 } from "lucide-react";
 import { getCategoryBadgeStyle } from "./FoodCard";
+import { LocationMap } from "../common/LocationMap";
 
 export const FoodDetailsModal = ({
   donation,
@@ -150,6 +152,21 @@ export const FoodDetailsModal = ({
               </p>
             </div>
 
+          </div>
+
+          {/* Real-time Map & Navigation */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-accent-500" />
+              <span>Real-Time Map & Pickup Directions</span>
+            </h4>
+            <LocationMap
+              latitude={donation.latitude || 12.9716}
+              longitude={donation.longitude || 77.5946}
+              address={donation.location}
+              title={`Pickup: ${donation.foodName}`}
+              height="h-52"
+            />
           </div>
 
           {/* Donor Information */}

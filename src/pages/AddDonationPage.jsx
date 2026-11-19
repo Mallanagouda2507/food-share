@@ -19,6 +19,8 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { createDonation, updateDonation, getDonationById } from "../services/donationService";
 import { FOOD_PRESETS } from "../services/seedData";
+import { LocationMap } from "../components/common/LocationMap";
+import { Compass, Crosshair, Navigation } from "lucide-react";
 
 const CATEGORIES = ["Cooked Food", "Fruits", "Vegetables", "Bakery", "Packaged Food"];
 
@@ -36,10 +38,15 @@ export const AddDonationPage = () => {
     servings: 10,
     imageUrl: FOOD_PRESETS[0].imageUrl,
     location: "",
+    latitude: 12.9716,
+    longitude: 77.5946,
+    isLiveLocation: false,
     contact: currentUser?.phone || "",
     preparedAt: new Date().toISOString().slice(0, 16),
     expiryAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 16),
   });
+
+  const [detectingLocation, setDetectingLocation] = useState(false);
 
   const [customImageMode, setCustomImageMode] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -70,6 +77,9 @@ export const AddDonationPage = () => {
           servings: data.servings || 10,
           imageUrl: data.imageUrl || FOOD_PRESETS[0].imageUrl,
           location: data.location || "",
+          latitude: data.latitude || 12.9716,
+          longitude: data.longitude || 77.5946,
+          isLiveLocation: Boolean(data.isLiveLocation),
           contact: data.contact || "",
           preparedAt: data.preparedAt ? new Date(data.preparedAt).toISOString().slice(0, 16) : "",
           expiryAt: data.expiryAt ? new Date(data.expiryAt).toISOString().slice(0, 16) : "",
@@ -80,6 +90,50 @@ export const AddDonationPage = () => {
     } finally {
       setFetchingEdit(false);
     }
+  };
+
+  const detectRealTimeLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          // Reverse geocoding via OpenStreetMap Nominatim
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+          );
+          const data = await res.json();
+          const readableAddress =
+            data.display_name || `Live GPS: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+          setFormData((prev) => ({
+            ...prev,
+            location: readableAddress,
+            latitude,
+            longitude,
+            isLiveLocation: true,
+          }));
+        } catch (e) {
+          setFormData((prev) => ({
+            ...prev,
+            location: `Live GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+            latitude,
+            longitude,
+            isLiveLocation: true,
+          }));
+        } finally {
+          setDetectingLocation(false);
+        }
+      },
+      (err) => {
+        alert("Location access denied or unavailable: " + err.message);
+        setDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleChange = (e) => {
@@ -403,10 +457,31 @@ export const AddDonationPage = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Pickup Location Address *
-                </label>
+              <div className="sm:col-span-2 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Pickup Location Address *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={detectRealTimeLocation}
+                    disabled={detectingLocation}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition-all shadow-2xs"
+                  >
+                    {detectingLocation ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                        <span>Detecting Real-Time GPS...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Crosshair className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>📍 Detect Current Live Location</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 <div className="relative">
                   <MapPin className="w-4 h-4 text-accent-500 absolute left-3.5 top-3" />
                   <input
@@ -415,8 +490,29 @@ export const AddDonationPage = () => {
                     name="location"
                     value={formData.location}
                     onChange={handleChange}
-                    placeholder="e.g. Community Kitchen, 42 Market Street, Entrance B"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="e.g. Community Kitchen, 42 Market Street, Entrance B (or click Detect Location)"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 font-medium"
+                  />
+                </div>
+
+                {formData.isLiveLocation && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Live GPS Verified: {Number(formData.latitude).toFixed(4)}°, {Number(formData.longitude).toFixed(4)}°
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-mono">Real-Time Sensor Active</span>
+                  </div>
+                )}
+
+                {/* Live Location Map Preview */}
+                <div className="pt-2">
+                  <LocationMap
+                    latitude={formData.latitude}
+                    longitude={formData.longitude}
+                    address={formData.location || "Pickup Location Point"}
+                    title={formData.foodName ? `${formData.foodName} - Pickup Point` : "Live Donor Location"}
+                    height="h-48"
                   />
                 </div>
               </div>
